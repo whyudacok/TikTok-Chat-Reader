@@ -1,10 +1,11 @@
-const { WebcastPushConnection } = require('tiktok-live-connector');
+const { TikTokLiveConnection } = require('tiktok-live-connector');
 const { EventEmitter } = require('events');
 
 let globalConnectionCount = 0;
 
 /**
  * TikTok LIVE connection wrapper with advanced reconnect functionality and error handling
+ * Patched for tiktok-live-connector v2.x
  */
 class TikTokConnectionWrapper extends EventEmitter {
     constructor(uniqueId, options, enableLog) {
@@ -20,23 +21,26 @@ class TikTokConnectionWrapper extends EventEmitter {
         this.reconnectWaitMs = 1000;
         this.maxReconnectAttempts = 5;
 
-        this.connection = new WebcastPushConnection(uniqueId, options);
+        // ✅ v2.x: TikTokLiveConnection (bukan WebcastPushConnection)
+        this.connection = new TikTokLiveConnection(uniqueId, options);
 
         this.connection.on('streamEnd', () => {
             this.log(`streamEnd event received, giving up connection`);
             this.reconnectEnabled = false;
-        })
+        });
 
-        this.connection.on('disconnected', ({ code, reason }) => {
+        // v2.x: callback disconnected tidak selalu terima {code, reason}
+        this.connection.on('disconnected', () => {
             globalConnectionCount -= 1;
-            this.log(`TikTok connection disconnected (code: ${code}, reason: ${reason})`);
-            this.scheduleReconnect();
+            this.log(`TikTok connection disconnected`);
+            this.scheduleReconnect('disconnected');
         });
 
         this.connection.on('error', (err) => {
-            this.log(`Error event triggered: ${err.info}, ${err.exception}`);
+            // v2.x: pakai err.message, bukan err.info
+            this.log(`Error event triggered: ${err.message || err}`);
             console.error(err);
-        })
+        });
     }
 
     connect(isReconnect) {
@@ -59,9 +63,8 @@ class TikTokConnectionWrapper extends EventEmitter {
             if (!isReconnect) {
                 this.emit('connected', state);
             }
-
         }).catch((err) => {
-            this.log(`${isReconnect ? 'Reconnect' : 'Connection'} failed, ${err}`);
+            this.log(`${isReconnect ? 'Reconnect' : 'Connection'} failed, ${err.message || err}`);
 
             let errorMessage = err.message || err.toString();
 
@@ -83,11 +86,10 @@ class TikTokConnectionWrapper extends EventEmitter {
                 // Notify client
                 this.emit('disconnected', errorMessage);
             }
-        })
+        });
     }
 
     scheduleReconnect(reason) {
-
         if (!this.reconnectEnabled) {
             return;
         }
@@ -108,8 +110,7 @@ class TikTokConnectionWrapper extends EventEmitter {
             this.reconnectCount += 1;
             this.reconnectWaitMs *= 2;
             this.connect(true);
-
-        }, this.reconnectWaitMs)
+        }, this.reconnectWaitMs);
     }
 
     disconnect() {
